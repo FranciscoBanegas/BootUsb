@@ -1,4 +1,4 @@
-# PowerShell Script for UEFI Version Gui
+# PowerShell Script Boot Gui
 # Author: Francisco Banegas
 # Repository: https://github.com/franciscobanegas
 # Date: 12/01/2024
@@ -57,14 +57,14 @@ $Group = New-Object System.Windows.Forms.GroupBox -Property @{
 $GPT = New-Object System.Windows.Forms.RadioButton -Property @{
     Location  = '40,20'
     Size      = '50, 20'
-    Text      = "GPT"
+    Text      = "Uefi"
     Checked   = $true
     BackColor = "transparent"
 }
 $MBR = New-Object System.Windows.Forms.RadioButton -Property @{
     Location  = '110,20'
     Size      = '50, 20'
-    Text      = "MBR"
+    Text      = "Legacy"
     BackColor = "transparent"
 }
 $Group.Controls.AddRange(@($GPT, $MBR))
@@ -74,19 +74,13 @@ $Iniciar = New-Object System.Windows.Forms.Button -Property @{
     AutoSize = $true
     Text     = "Iniciar"
 }
-function USBBootloader {
+function USBBootloaderUEFI {
     $usbDrive = $selecUsb.Text
     Write-Host $usbDrive
     #Limpiar USB 
     Clear-Disk -FriendlyName $usbDrive -RemoveData -Confirm:$false -PassThru
     $Number = Get-Disk -FriendlyName $usbDrive | Select-Object -ExpandProperty Number
     Write-Host $Number
-    # Inicializar el disco con el estilo de partición seleccionado
-    # if ($GPT.Checked -eq $true) {
-    #     Initialize-Disk -Number $Number -PartitionStyle "GPT" -PassThru
-    # } elseif ($MBR.Checked -eq $true) {
-    #     Initialize-Disk -Number $Number -PartitionStyle "MBR" -PassThru 
-    # }
     $ubsPartition = New-Partition -DiskNumber $Number -UseMaximumSize
     Write-Host $ubsPartition
     $ubsPartition | Format-Volume -FileSystem FAT32 -NewFileSystemLabel $Nombre.Text  -Confirm:$false
@@ -108,36 +102,115 @@ function USBBootloader {
     ########################################
     ##########Conversion a .Swm############
     #######################################
-    if (test-path 'C:\temp') { 
-        Write-Host 'ya existe la carpeta por favor remueva o renombrela para poder continuar'
+    if (test-path 'C:\USBTemp') { 
+        Write-Host 'ya existe la carpeta por favor remueve o renombre para poder continuar'
     }
     else {
-        New-Item -Path 'C:\' -Name "temp" -ItemType "directory"
+        New-Item -Path 'C:\' -Name "USBTemp" -ItemType "directory"
         #  Filter router
         $origin = $IsoRouter + "sources\install.wim"
-        $destination = 'C:\temp\install.swm'
+        $destination = 'C:\USBTemp\install.swm'
         Write-Host $destination
         #Create format .swm
-        Dism /Split-Image /ImageFile:$origin /SWMFile:$destination /FileSize:3500
+        if (test-path $origin) {
+            Dism /Split-Image /ImageFile:$origin /SWMFile:$destination /FileSize:3500
+        }
+        elseif (test-path $origin2) {
+            Dism /Split-Image /ImageFile:$origin2 /SWMFile:$destination /FileSize:3500
+        }
+        else {
+            Write-Host 'No existe install.wim o install.esd'
+        }
         #Copy .swm
         start-sleep -Seconds 5
         Write-Host 'Copiando .swm'
-        robocopy "C:\temp" "$ResultDestinationPath\sources" "*.swm" /COPYALL /R:3 /W:5 
+        robocopy "C:\USBTemp" "$ResultDestinationPath\sources" "*.swm" /COPYALL /R:3 /W:5 
         #Desmontar ISO
         Write-Host 'Limpiando residuos'
         Start-Sleep -Seconds 5
         Dismount-DiskImage -ImagePath $ImageIso.FileName    
         start-sleep -Seconds 5
-        Remove-Item -Path 'C:\temp' -Recurse -Force
+        Remove-Item -Path 'C:\USBTemp' -Recurse -Force
+        [System.Windows.Forms.MessageBox]::Show('Instalación completada correctamente', 'Instalación', 'OK', 'Information')
     }
 }
+function USBBootloaderLegacy {
+    $usbDrive = $selecUsb.Text
+    Write-Host $usbDrive
+    #Limpiar USB 
+    Clear-Disk -FriendlyName $usbDrive -RemoveData -Confirm:$false -PassThru
+    $Number = Get-Disk -FriendlyName $usbDrive | Select-Object -ExpandProperty Number
+    Write-Host $Number
+    $ubsPartition = New-Partition -DiskNumber $Number -UseMaximumSize -MbrType IFS -IsActive
+    Write-Host $ubsPartition
+    $ubsPartition | Format-Volume -FileSystem FAT32 -NewFileSystemLabel $Nombre.Text  -Confirm:$false
+    Add-PartitionAccessPath -DiskNumber $Number -PartitionNumber $ubsPartition.PartitionNumber -AssignDriveLetter
+    #Montar image ISO
+    Mount-DiskImage -ImagePath $ImageIso.FileName
+    $isoDrive = (Get-DiskImage -ImagePath $ImageIso.FileName | Get-Volume).DriveLetter
+    $IsoRouter = $isoDrive + ":\"
+    #Copiar ISO
+    $DestinationPath = Get-Volume -FriendlyName $Nombre.Text | Select-Object -ExpandProperty DriveLetter
+    Write-Host $DestinationPath
+    $ResultDestinationPath = $DestinationPath + ":\"
+    Write-Host $ResultDestinationPath
+    <##
+     Copiamos los archivos de la ISO a la ruta de destino pero no copiamos el install.win 
+     Hasta su conversion a .swm
+     ##>
+    robocopy $IsoRouter $ResultDestinationPath /E /COPYALL /R:0 /W:0 /V
+    ########################################
+    ##########Conversion a .Swm############
+    #######################################
+    if (test-path 'C:\USBTemp') { 
+        Write-Host 'ya existe la carpeta por favor remueve o renombre para poder continuar'
+    }
+    else {
+        New-Item -Path 'C:\' -Name "USBTemp" -ItemType "directory"
+        #  Filter router
+        $origin = $IsoRouter + "sources\install.wim"
+        $destination = 'C:\USBTemp\install.swm'
+        Write-Host $destination
+        #Create format .swm
+        if (test-path $origin) {
+            Dism /Split-Image /ImageFile:$origin /SWMFile:$destination /FileSize:3500
+        }
+        elseif (test-path $origin2) {
+            Dism /Split-Image /ImageFile:$origin2 /SWMFile:$destination /FileSize:3500
+        }
+        else {
+            Write-Host 'No existe install.wim o install.esd'
+        }
+        #Copy .swm
+        start-sleep -Seconds 5
+        Write-Host 'Copiando .swm'
+        robocopy "C:\USBTemp" "$ResultDestinationPath\sources" "*.swm" /COPYALL /R:3 /W:5 
+        #Desmontar ISO
+        Write-Host 'Limpiando residuos'
+        Start-Sleep -Seconds 5
+        Dismount-DiskImage -ImagePath $ImageIso.FileName    
+        start-sleep -Seconds 5
+        Remove-Item -Path 'C:\USBTemp' -Recurse -Force
+        [System.Windows.Forms.MessageBox]::Show('Instalación completada correctamente', 'Instalación', 'OK', 'Information')
+    }
+}
+
+
 $Iniciar.add_click({
-        USBBootloader
+        if ($GPT.Checked -eq $true) {
+            USBBootloaderUEFI
+        }
+        elseif ($MBR.Checked -eq $true) {
+            USBBootloaderLegacy
+        }
+        else {
+            Write-Host 'seleciona un tipo de formato de arranque valido'
+        }
     })
 $SelectImage.add_click({
         $ImageIso.ShowDialog()
         $form.Text = $ImageIso.FileName
     })
-$form.Controls.AddRange(@($Iniciar, $SelectImage, $Nombre, $selecUsb))
+$form.Controls.AddRange(@($Iniciar, $SelectImage, $Nombre, $selecUsb, $Group))
 $form.showdialog()
 $form.dispose()
