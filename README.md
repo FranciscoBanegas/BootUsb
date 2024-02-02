@@ -1,2 +1,2 @@
-# bootable-usb-uefi
-boteador usb uefi gui
+# boteador usb uefi gui
+Boteador USB básico con interfaz GUI hecho con Powershell para sistemas operativo Windows 10 y 11
